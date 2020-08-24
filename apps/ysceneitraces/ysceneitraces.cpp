@@ -71,6 +71,10 @@ struct app_state {
   std::atomic<int> current = 0;
   std::atomic<int> total   = 0;
 
+  // ibl textures
+  trace_texture*         irradiance_map;
+  vector<trace_texture*> reflection_maps;
+
   ~app_state() {
     if (render_state) {
       trace_stop(render_state);

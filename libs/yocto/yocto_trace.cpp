@@ -2376,11 +2376,6 @@ static vec4f trace_path(const trace_scene* scene, const ray3f& ray_,
         }
       }
 
-      if (abs(position.y) < 0.01) {
-        vec3f vectest = {1, 0.2, 0.2};
-        weight *= vectest;
-      }
-
       // setup next iteration
       ray = {position, incoming};
     } else {

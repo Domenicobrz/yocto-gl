@@ -33,6 +33,8 @@
 #include <yocto/yocto_trace.h>
 #include <yocto_gui/yocto_imgui.h>
 #include <yocto_gui/yocto_opengl.h>
+
+#include "cpuibl.h"
 using namespace yocto;
 
 #include <future>
@@ -215,6 +217,8 @@ void init_scene(trace_scene* scene, sceneio_scene* ioscene,
     set_emission(environment, ioenvironment->emission,
         texture_map.at(ioenvironment->emission_tex));
   }
+
+  cpuibl::init_cpu_ibl(scene);
 
   // done
   if (progress_cb) progress_cb("converting done", progress.x++, progress.y);

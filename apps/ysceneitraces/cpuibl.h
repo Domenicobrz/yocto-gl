@@ -24,6 +24,23 @@ inline void parallel_for(int size, const std::function<void(int)>& f) {
   }
 }
 
+inline void parallel_for(
+    int num_threads, int size, const std::function<void(int)>& f) {
+  auto threads = vector<std::thread>(num_threads);
+  auto batch   = [&](int k) {
+    int from = k * (size / num_threads);
+    int to   = min(from + (size / num_threads), size);
+    for (int i = from; i < to; i++) f(i);
+  };
+
+  for (int k = 0; k < num_threads; k++) {
+    threads[k] = std::thread(batch, k);
+  }
+  for (int k = 0; k < size; k++) {
+    threads[k].join();
+  }
+}
+
 inline void serial_for(int size, const std::function<void(int)>& f) {
   for (int i = 0; i < size; i++) {
     f(i);
@@ -89,11 +106,10 @@ inline vector<vec4f> computeIrradianceTexture(
   auto img  = vector<vec4f>(size);
 
   // modify env texture
-  // for (int i = 0; i < size; i++) {
   auto f = [&](int i) {
     int tx = i % extent.x;
     int ty = i / extent.x;
-    printf("%d, %d\n", tx, ty);
+    // printf("%d, %d\n", tx, ty);
 
     // uv.y needs to be flipped
     vec2f uv = {
@@ -143,7 +159,8 @@ inline vector<vec4f> computeIrradianceTexture(
     // ***************************
   };
 
-  parallel_for(size, f);
+  parallel_for(8, size, f);
+  // parallel_for(size, f);
   // serial_for(size, f);
 
   return img;

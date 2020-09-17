@@ -51,7 +51,7 @@ vec2f hammersley(uint i, int N) {
   return vec2f{float(i) / float(N), radical_inverse(i)};
 }
 
-vec3f sample_ggx(vec2f rn, vec3f N, float roughness) {
+vec3f sample_ggx(const vec2f& rn, const vec3f& N, float roughness) {
   float a = roughness * roughness;
 
   float phi       = 2.0f * pif * rn.x;
@@ -74,7 +74,8 @@ vec3f sample_ggx(vec2f rn, vec3f N, float roughness) {
   return normalize(result);
 }
 
-inline vec4f getTexel(vector<vec4f>& img, vec2f uv, vec2i size) {
+inline vec4f getTexel(
+    const vector<vec4f>& img, const vec2f& uv, const vec2i& size) {
   int tx = uv.x * size.x;
   int ty = (1.0f - uv.y) * size.y;
 
@@ -139,15 +140,19 @@ inline vector<vec4f> computeIrradianceTexture(
     for (float phi = 0.0; phi < 2.0 * pif; phi += sampleDelta) {
       for (float theta = 0.0; theta < 0.5 * pif; theta += sampleDelta) {
         // spherical to cartesian (in tangent space)
-        vec3f tangentSample = {yocto::sin(theta) * yocto::cos(phi),
-            yocto::sin(theta) * yocto::sin(phi), yocto::cos(theta)};
+        auto  sin_theta     = yocto::sin(theta);
+        auto  cos_theta     = 1 - sin_theta * sin_theta;
+        auto  sin_phi       = yocto::sin(phi);
+        auto  cos_phi       = 1 - sin_phi * sin_phi;
+        vec3f tangentSample = {
+            sin_theta * cos_phi, sin_theta * sin_phi, cos_theta};
 
         // tangent space to world
         vec3f sampleVec = tangentSample.x * right + tangentSample.y * up +
                           tangentSample.z * normal;
 
-        irradiance += getTexelFromDir(envmap, sampleVec, extent) *
-                      yocto::cos(theta) * yocto::sin(theta);
+        irradiance += getTexelFromDir(envmap, sampleVec, extent) * cos_theta *
+                      sin_theta;
         nrSamples++;
       }
     }
@@ -167,7 +172,7 @@ inline vector<vec4f> computeIrradianceTexture(
 }
 
 inline vector<vector<vec4f>> computePrefilteredTextures(
-    vector<vec4f>& envmap, vec2i extent, int levels) {
+    const vector<vec4f>& envmap, const vec2i& extent, int levels) {
   vector<vector<vec4f>> imgs;
 
   int size        = envmap.size();

@@ -14,6 +14,22 @@ float radical_inverse(uint bits) {
   return float(bits) * 2.3283064365386963e-10;  // / 0x100000000
 }
 
+inline void parallel_for(int size, const std::function<void(int)>& f) {
+  auto threads = vector<std::thread>(size);
+  for (int i = 0; i < size; i++) {
+    threads[i] = std::thread(f, i);
+  }
+  for (int i = 0; i < size; i++) {
+    threads[i].join();
+  }
+}
+
+inline void serial_for(int size, const std::function<void(int)>& f) {
+  for (int i = 0; i < size; i++) {
+    f(i);
+  }
+}
+
 vec2f hammersley(uint i, int N) {
   return vec2f{float(i) / float(N), radical_inverse(i)};
 }
@@ -52,7 +68,7 @@ inline vec4f getTexel(vector<vec4f>& img, vec2f uv, vec2i size) {
 }
 
 inline vec4f getTexelFromDir(
-    vector<vec4f>& img, const vec3f& dir, const vec2i& size) {
+    const vector<vec4f>& img, const vec3f& dir, const vec2i& size) {
   vec2f uv = {yocto::atan2(dir.z, dir.x) / (2.0f * pif),
       1.0f - yocto::acos(dir.y) / pif};
 
@@ -68,15 +84,16 @@ inline vec4f getTexelFromDir(
 }
 
 inline vector<vec4f> computeIrradianceTexture(
-    vector<vec4f>& envmap, vec2i extent) {
-  vector<vec4f> img;
-
-  int size = envmap.size();
+    const vector<vec4f>& envmap, const vec2i& extent) {
+  auto size = envmap.size();
+  auto img  = vector<vec4f>(size);
 
   // modify env texture
-  for (int i = 0; i < size; i++) {
+  // for (int i = 0; i < size; i++) {
+  auto f = [&](int i) {
     int tx = i % extent.x;
     int ty = i / extent.x;
+    printf("%d, %d\n", tx, ty);
 
     // uv.y needs to be flipped
     vec2f uv = {
@@ -120,11 +137,14 @@ inline vector<vec4f> computeIrradianceTexture(
     }
     irradiance = pif * irradiance * (1.0f / float(nrSamples));
 
-    img.push_back({irradiance.x, irradiance.y, irradiance.z, 1});
+    img[i] = {irradiance.x, irradiance.y, irradiance.z, 1};
 
     // ***************************
     // ***************************
-  }
+  };
+
+  parallel_for(size, f);
+  // serial_for(size, f);
 
   return img;
 }
@@ -187,18 +207,19 @@ inline vector<vector<vec4f>> computePrefilteredTextures(
 }
 
 inline void init_cpu_ibl(trace_scene* scene) {
-  auto img    = scene->environments[0]->emission_tex->hdr.data_vector();
-  auto extent = scene->environments[0]->emission_tex->hdr.imsize();
+  auto& img    = scene->environments[0]->emission_tex->hdr.data_vector();
+  auto  extent = scene->environments[0]->emission_tex->hdr.imsize();
 
-  // auto irradianceMap   = computeIrradianceTexture(img, extent);
-  auto prefilteredMaps = computePrefilteredTextures(img, extent, 5);
+  auto irradianceMap = computeIrradianceTexture(img, extent);
+  // auto prefilteredMaps = computePrefilteredTextures(img, extent, 5);
+  scene->environments[0]->emission_tex->hdr.data_vector() = irradianceMap;
 
   // assign new env texture
-  int i = 0;
-  for (vec4f* it = scene->environments[0]->emission_tex->hdr.begin();
-       it != scene->environments[0]->emission_tex->hdr.end(); it++, i++) {
-    // scene->environments[0]->emission_tex->hdr[i] = irradianceMap[i];
-    scene->environments[0]->emission_tex->hdr[i] = prefilteredMaps[2][i];
-  }
+  //  int i = 0;
+  //  for (vec4f* it = scene->environments[0]->emission_tex->hdr.begin();
+  //       it != scene->environments[0]->emission_tex->hdr.end(); it++, i++) {
+  // scene->environments[0]->emission_tex->hdr[i] = irradianceMap[i];
+  //    scene->environments[0]->emission_tex->hdr[i] = prefilteredMaps[2][i];
+  //  }
 }
 }  // namespace cpuibl

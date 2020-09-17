@@ -41,6 +41,25 @@ vec3f sample_ggx(vec2f rn, vec3f N, float roughness) {
   return normalize(result);
 }
 
+float GeometrySchlickGGX(float NdotV, float roughness) {
+  float a = roughness;
+  float k = (a * a) / 2.0f;
+
+  float nom   = NdotV;
+  float denom = NdotV * (1.0f - k) + k;
+
+  return nom / denom;
+}
+
+float GeometrySmith(vec3f N, vec3f V, vec3f L, float roughness) {
+  float NdotV = max(dot(N, V), 0.0f);
+  float NdotL = max(dot(N, L), 0.0f);
+  float ggx2  = GeometrySchlickGGX(NdotV, roughness);
+  float ggx1  = GeometrySchlickGGX(NdotL, roughness);
+
+  return ggx1 * ggx2;
+}
+
 inline vec4f getTexel(vector<vec4f>& img, vec2f uv, vec2i size) {
   int tx = uv.x * size.x;
   int ty = (1.0f - uv.y) * size.y;
@@ -186,19 +205,85 @@ inline vector<vector<vec4f>> computePrefilteredTextures(
   return imgs;
 }
 
+inline vector<vec4f> computeBRDFLUT(vector<vec4f>& envmap, vec2i extent) {
+  vector<vec4f> img;
+
+  int size = envmap.size();
+
+  // modify env texture
+  for (int i = 0; i < size; i++) {
+    int tx = i % extent.x;
+    int ty = i / extent.x;
+
+    // uv.y needs to be flipped
+    vec2f uv = {
+        float(tx) / float(extent.x), 1.0f - float(ty) / float(extent.y)};
+
+    float NdotV     = uv.x;
+    float roughness = uv.y;
+
+    vec3f V;
+    V.x = yocto::sqrt(1.0f - NdotV * NdotV);
+    V.y = 0.0f;
+    V.z = NdotV;
+
+    float A = 0.0;
+    float B = 0.0;
+
+    vec3f N = vec3f{0.0f, 0.0f, 1.0f};
+
+    const uint SAMPLE_COUNT = 1024;  // 1024u;
+    for (uint i = 0u; i < SAMPLE_COUNT; ++i) {
+      vec2f Xi = hammersley(i, SAMPLE_COUNT);
+      vec3f H  = sample_ggx(Xi, N, roughness);
+      vec3f L  = normalize(2.0f * dot(V, H) * H - V);
+
+      float NdotL = max(L.z, 0.0);
+      float NdotH = max(H.z, 0.0);
+      float VdotH = max(dot(V, H), 0.0);
+
+      if (NdotL > 0.0) {
+        float G     = GeometrySmith(N, V, L, roughness);
+        float G_Vis = (G * VdotH) / (NdotH * NdotV);
+        float Fc    = pow(1.0 - VdotH, 5.0);
+
+        A += (1.0 - Fc) * G_Vis;
+        B += Fc * G_Vis;
+      }
+    }
+    A /= float(SAMPLE_COUNT);
+    B /= float(SAMPLE_COUNT);
+
+    img.push_back({A, B, 0, 1});
+  }
+
+  return img;
+}
+
 inline void init_cpu_ibl(trace_scene* scene) {
   auto img    = scene->environments[0]->emission_tex->hdr.data_vector();
   auto extent = scene->environments[0]->emission_tex->hdr.imsize();
 
   // auto irradianceMap   = computeIrradianceTexture(img, extent);
-  auto prefilteredMaps = computePrefilteredTextures(img, extent, 5);
+  // auto prefilteredMaps = computePrefilteredTextures(img, extent, 5);
+  /**
+    debuggato con:
+    if (position.y < 0.001) {
+      auto texture = eval_texture(scene->environments[0]->emission_tex,
+          {position.x * 2.0f, position.z * 2.0f});
+      weight *= {texture.x, texture.y, 1};
+    }
+    dentro trace_path
+  */
+  auto BRDFLUT = computeBRDFLUT(img, extent);
 
   // assign new env texture
   int i = 0;
   for (vec4f* it = scene->environments[0]->emission_tex->hdr.begin();
        it != scene->environments[0]->emission_tex->hdr.end(); it++, i++) {
     // scene->environments[0]->emission_tex->hdr[i] = irradianceMap[i];
-    scene->environments[0]->emission_tex->hdr[i] = prefilteredMaps[2][i];
+    // scene->environments[0]->emission_tex->hdr[i] = prefilteredMaps[2][i];
+    scene->environments[0]->emission_tex->hdr[i] = BRDFLUT[i];
   }
 }
 }  // namespace cpuibl

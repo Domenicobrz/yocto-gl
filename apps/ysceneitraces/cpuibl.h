@@ -14,11 +14,63 @@ float radical_inverse(uint bits) {
   return float(bits) * 2.3283064365386963e-10;  // / 0x100000000
 }
 
+float GeometrySchlickGGX(float NdotV, float roughness) {
+  float a = roughness;
+  float k = (a * a) / 2.0f;
+
+  float nom   = NdotV;
+  float denom = NdotV * (1.0f - k) + k;
+
+  return nom / denom;
+}
+
+float GeometrySmith(vec3f N, vec3f V, vec3f L, float roughness) {
+  float NdotV = max(dot(N, V), 0.0f);
+  float NdotL = max(dot(N, L), 0.0f);
+  float ggx2  = GeometrySchlickGGX(NdotV, roughness);
+  float ggx1  = GeometrySchlickGGX(NdotL, roughness);
+
+  return ggx1 * ggx2;
+}
+
+inline void parallel_for(int size, const std::function<void(int)>& f) {
+  auto threads = vector<std::thread>(size);
+  for (int i = 0; i < size; i++) {
+    threads[i] = std::thread(f, i);
+  }
+  for (int i = 0; i < size; i++) {
+    threads[i].join();
+  }
+}
+
+inline void parallel_for(
+    int num_threads, int size, const std::function<void(int)>& f) {
+  auto threads = vector<std::thread>(num_threads);
+  auto batch   = [&](int k) {
+    int from = k * (size / num_threads);
+    int to   = min(from + (size / num_threads), size);
+    for (int i = from; i < to; i++) f(i);
+  };
+
+  for (int k = 0; k < num_threads; k++) {
+    threads[k] = std::thread(batch, k);
+  }
+  for (int k = 0; k < num_threads; k++) {
+    threads[k].join();
+  }
+}
+
+inline void serial_for(int size, const std::function<void(int)>& f) {
+  for (int i = 0; i < size; i++) {
+    f(i);
+  }
+}
+
 vec2f hammersley(uint i, int N) {
   return vec2f{float(i) / float(N), radical_inverse(i)};
 }
 
-vec3f sample_ggx(vec2f rn, vec3f N, float roughness) {
+vec3f sample_ggx(const vec2f& rn, const vec3f& N, float roughness) {
   float a = roughness * roughness;
 
   float phi       = 2.0f * pif * rn.x;
@@ -41,26 +93,8 @@ vec3f sample_ggx(vec2f rn, vec3f N, float roughness) {
   return normalize(result);
 }
 
-float GeometrySchlickGGX(float NdotV, float roughness) {
-  float a = roughness;
-  float k = (a * a) / 2.0f;
-
-  float nom   = NdotV;
-  float denom = NdotV * (1.0f - k) + k;
-
-  return nom / denom;
-}
-
-float GeometrySmith(vec3f N, vec3f V, vec3f L, float roughness) {
-  float NdotV = max(dot(N, V), 0.0f);
-  float NdotL = max(dot(N, L), 0.0f);
-  float ggx2  = GeometrySchlickGGX(NdotV, roughness);
-  float ggx1  = GeometrySchlickGGX(NdotL, roughness);
-
-  return ggx1 * ggx2;
-}
-
-inline vec4f getTexel(vector<vec4f>& img, vec2f uv, vec2i size) {
+inline vec4f getTexel(
+    const vector<vec4f>& img, const vec2f& uv, const vec2i& size) {
   int tx = uv.x * size.x;
   int ty = (1.0f - uv.y) * size.y;
 
@@ -71,7 +105,7 @@ inline vec4f getTexel(vector<vec4f>& img, vec2f uv, vec2i size) {
 }
 
 inline vec4f getTexelFromDir(
-    vector<vec4f>& img, const vec3f& dir, const vec2i& size) {
+    const vector<vec4f>& img, const vec3f& dir, const vec2i& size) {
   vec2f uv = {yocto::atan2(dir.z, dir.x) / (2.0f * pif),
       1.0f - yocto::acos(dir.y) / pif};
 
@@ -87,15 +121,15 @@ inline vec4f getTexelFromDir(
 }
 
 inline vector<vec4f> computeIrradianceTexture(
-    vector<vec4f>& envmap, vec2i extent) {
-  vector<vec4f> img;
-
-  int size = envmap.size();
+    const vector<vec4f>& envmap, const vec2i& extent) {
+  auto size = envmap.size();
+  auto img  = vector<vec4f>(size);
 
   // modify env texture
-  for (int i = 0; i < size; i++) {
+  auto f = [&](int i) {
     int tx = i % extent.x;
     int ty = i / extent.x;
+    // printf("%d, %d\n", tx, ty);
 
     // uv.y needs to be flipped
     vec2f uv = {
@@ -120,7 +154,7 @@ inline vector<vec4f> computeIrradianceTexture(
     up          = normalize(cross(normal, right));
 
     // float sampleDelta = 0.025;
-    float sampleDelta = 0.015;
+    float sampleDelta = 0.025;
     float nrSamples   = 0.0;
     for (float phi = 0.0; phi < 2.0 * pif; phi += sampleDelta) {
       for (float theta = 0.0; theta < 0.5 * pif; theta += sampleDelta) {
@@ -139,31 +173,36 @@ inline vector<vec4f> computeIrradianceTexture(
     }
     irradiance = pif * irradiance * (1.0f / float(nrSamples));
 
-    img.push_back({irradiance.x, irradiance.y, irradiance.z, 1});
+    img[i] = {irradiance.x, irradiance.y, irradiance.z, 1};
 
     // ***************************
     // ***************************
-  }
+  };
+
+  parallel_for(16, size, f);
+  // parallel_for(size, f);
+  // serial_for(size, f);
 
   return img;
-}
+}  // namespace cpuibl
 
 inline vector<vector<vec4f>> computePrefilteredTextures(
-    vector<vec4f>& envmap, vec2i extent, int levels) {
+    const vector<vec4f>& envmap, const vec2i& extent, int levels) {
   vector<vector<vec4f>> imgs;
 
   int size        = envmap.size();
-  int num_samples = 512;  // 1024;
+  int num_samples = 1024;  // 1024;
 
   for (int l = 0; l < levels; l++) {
-    imgs.push_back(vector<vec4f>());
+    imgs.push_back(vector<vec4f>(size));
 
     vector<vec4f>& img = imgs[l];
 
     float roughness = float(l) / float(levels - 1);
+    roughness       = roughness * roughness;
 
     // modify env texture
-    for (int i = 0; i < size; i++) {
+    auto f = [&](int i) {
       int tx = i % extent.x;
       int ty = i / extent.x;
 
@@ -192,26 +231,28 @@ inline vector<vector<vec4f>> computePrefilteredTextures(
                               // direction of reflect glsl
         float NdotL = dot(N, L);
         if (NdotL > 0.0f) {
-          result += getTexelFromDir(envmap, L, extent) * NdotL;
+          result += getTexelFromDir(l == 0 ? envmap : imgs[l - 1], L, extent) *
+                    NdotL;
           total_weight += NdotL;
         }
       }
       result = result / total_weight;
 
-      img.push_back({result.x, result.y, result.z, 1.0f});
-    }
+      img[i] = {result.x, result.y, result.z, 1.0f};
+    };
+
+    parallel_for(16, size, f);
   }
 
   return imgs;
 }
 
 inline vector<vec4f> computeBRDFLUT(vector<vec4f>& envmap, vec2i extent) {
-  vector<vec4f> img;
-
-  int size = envmap.size();
+  int  size = envmap.size();
+  auto img  = vector<vec4f>(size);
 
   // modify env texture
-  for (int i = 0; i < size; i++) {
+  auto f = [&](int i) {
     int tx = i % extent.x;
     int ty = i / extent.x;
 
@@ -254,36 +295,23 @@ inline vector<vec4f> computeBRDFLUT(vector<vec4f>& envmap, vec2i extent) {
     A /= float(SAMPLE_COUNT);
     B /= float(SAMPLE_COUNT);
 
-    img.push_back({A, B, 0, 1});
-  }
+    img[i] = {A, B, 0, 1};
+  };
+
+  parallel_for(16, size, f);
 
   return img;
 }
 
 inline void init_cpu_ibl(trace_scene* scene) {
-  auto img    = scene->environments[0]->emission_tex->hdr.data_vector();
-  auto extent = scene->environments[0]->emission_tex->hdr.imsize();
+  auto& img    = scene->environments[0]->emission_tex->hdr.data_vector();
+  auto  extent = scene->environments[0]->emission_tex->hdr.imsize();
 
-  // auto irradianceMap   = computeIrradianceTexture(img, extent);
-  // auto prefilteredMaps = computePrefilteredTextures(img, extent, 5);
-  /**
-    debuggato con:
-    if (position.y < 0.001) {
-      auto texture = eval_texture(scene->environments[0]->emission_tex,
-          {position.x * 2.0f, position.z * 2.0f});
-      weight *= {texture.x, texture.y, 1};
-    }
-    dentro trace_path
-  */
-  auto BRDFLUT = computeBRDFLUT(img, extent);
-
-  // assign new env texture
-  int i = 0;
-  for (vec4f* it = scene->environments[0]->emission_tex->hdr.begin();
-       it != scene->environments[0]->emission_tex->hdr.end(); it++, i++) {
-    // scene->environments[0]->emission_tex->hdr[i] = irradianceMap[i];
-    // scene->environments[0]->emission_tex->hdr[i] = prefilteredMaps[2][i];
-    scene->environments[0]->emission_tex->hdr[i] = BRDFLUT[i];
-  }
+  // auto irradianceMap = computeIrradianceTexture(img, extent);
+  auto prefilteredMaps = computePrefilteredTextures(img, extent, 5);
+  // auto BRDFLUT = computeBRDFLUT(img, extent);
+  // scene->environments[0]->emission_tex->hdr.data_vector() = irradianceMap;
+  scene->environments[0]->emission_tex->hdr.data_vector() = prefilteredMaps[3];
+  // scene->environments[0]->emission_tex->hdr.data_vector() = BRDFLUT;
 }
 }  // namespace cpuibl

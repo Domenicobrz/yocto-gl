@@ -227,6 +227,13 @@ struct trace_light {
   trace_environment* environment = nullptr;
 };
 
+struct trace_environment_precompute {
+  trace_texture*         environment    = new trace_texture{};
+  trace_texture*         irradiance_map = new trace_texture{};
+  vector<trace_texture*> specular_map   = vector<trace_texture*>{};
+  trace_texture*         brdf_lut       = new trace_texture{};
+};
+
 // Scene comprised an array of objects whose memory is owened by the scene.
 // All members are optional,Scene objects (camera, instances, environments)
 // have transforms defined internally. A scene can optionally contain a
@@ -248,8 +255,9 @@ struct trace_scene {
   string copyright = "";
 
   // computed properties
-  vector<trace_light*> lights = {};
-  trace_bvh*           bvh    = nullptr;
+  vector<trace_light*>          lights    = {};
+  trace_bvh*                    bvh       = nullptr;
+  trace_environment_precompute* trace_env = new trace_environment_precompute{};
 #ifdef YOCTO_EMBREE
   RTCScene embree_bvh = nullptr;
 #endif
@@ -474,6 +482,7 @@ enum struct trace_sampler_type {
   falsecolor,  // false color rendering
   albedo,      // renders the (approximate) albedo of objects for denoising
   normal,      // renders the normals of objects for denoising
+  ibl,         // renders the scene with ibl
 };
 // Type of false color visualization
 enum struct trace_falsecolor_type {
@@ -506,7 +515,7 @@ struct trace_params {
 };
 
 const auto trace_sampler_names = std::vector<std::string>{
-    "path", "naive", "eyelight", "falsecolor", "dalbedo", "dnormal"};
+    "path", "naive", "eyelight", "falsecolor", "dalbedo", "dnormal", "ibl"};
 
 const auto trace_falsecolor_names = vector<string>{"position", "normal",
     "frontfacing", "gnormal", "gfrontfacing", "texcoord", "color", "emission",

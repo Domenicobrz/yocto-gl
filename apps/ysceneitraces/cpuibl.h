@@ -303,15 +303,35 @@ inline vector<vec4f> computeBRDFLUT(vector<vec4f>& envmap, vec2i extent) {
   return img;
 }
 
+struct trace_environment_precompute {
+  trace_texture* environment    = new trace_texture{};
+  trace_texture* irradiance_map = new trace_texture{};
+  trace_texture* specular_map   = new trace_texture{};
+  trace_texture* brdf_lut       = new trace_texture{};
+} trace_env_precumpute;
+
 inline void init_cpu_ibl(trace_scene* scene) {
   auto& img    = scene->environments[0]->emission_tex->hdr.data_vector();
   auto  extent = scene->environments[0]->emission_tex->hdr.imsize();
 
-  // auto irradianceMap = computeIrradianceTexture(img, extent);
-  auto prefilteredMaps = computePrefilteredTextures(img, extent, 5);
-  // auto BRDFLUT = computeBRDFLUT(img, extent);
-  // scene->environments[0]->emission_tex->hdr.data_vector() = irradianceMap;
-  scene->environments[0]->emission_tex->hdr.data_vector() = prefilteredMaps[3];
-  // scene->environments[0]->emission_tex->hdr.data_vector() = BRDFLUT;
+  // auto& irradianceMap  = scene->trace_env->irradiance_map->hdr;
+  // irradianceMap.extent = extent;
+  // irradianceMap.pixels = computeIrradianceTexture(img, extent);
+
+  // auto& BRDFLUT  = scene->trace_env->brdf_lut->hdr;
+  // BRDFLUT.extent = extent;
+  // BRDFLUT.pixels = computeBRDFLUT(img, extent);
+
+  // int   specularLevels        = 5;
+  // auto& prefilteredMapsVector = scene->trace_env->specular_map;
+  // auto  prefilteredMaps       = computePrefilteredTextures(img, extent, 5);
+  // for (int i = 0; i < specularLevels; i++) {
+  //   trace_texture* spec_level_texture = new trace_texture{};
+  //   spec_level_texture->hdr.extent    = extent;
+  //   spec_level_texture->hdr.pixels    = prefilteredMaps[i];
+  //   prefilteredMapsVector.push_back(spec_level_texture);
+  // }
+
+  scene->trace_env->environment = scene->environments[0]->emission_tex;
 }
 }  // namespace cpuibl

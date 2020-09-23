@@ -2492,6 +2492,158 @@ static vec4f trace_naive(const trace_scene* scene, const ray3f& ray_,
 }
 
 // Eyelight for quick previewing.
+static vec4f trace_ibl(const trace_scene* scene, const ray3f& ray_,
+    rng_state& rng, const trace_params& params) {
+  // initialize
+  auto radiance      = zero3f;
+  auto weight        = vec3f{1, 1, 1};
+  auto ray           = ray_;
+  auto volume_stack  = vector<trace_vsdf>{};
+  auto max_roughness = 0.0f;
+  auto hit           = !params.envhidden && !scene->environments.empty();
+
+  // trace  path
+  for (auto bounce = 0; bounce < params.bounces; bounce++) {
+    // intersect next point
+    auto intersection = intersect_scene_bvh(scene, ray);
+    if (!intersection.hit) {
+      if (bounce || !params.envhidden)
+        radiance += weight * eval_environment(scene, ray.d);
+      break;
+    }
+
+    // handle transmission if inside a volume
+    auto in_volume = false;
+    if (!volume_stack.empty()) {
+      auto& vsdf     = volume_stack.back();
+      auto  distance = sample_transmittance(
+          vsdf.density, intersection.distance, rand1f(rng), rand1f(rng));
+      weight *= eval_transmittance(vsdf.density, distance) /
+                sample_transmittance_pdf(
+                    vsdf.density, distance, intersection.distance);
+      in_volume             = distance < intersection.distance;
+      intersection.distance = distance;
+    }
+
+    // switch between surface and volume
+    if (!in_volume) {
+      // prepare shading point
+      auto outgoing = -ray.d;
+      auto instance = scene->instances[intersection.instance];
+      auto element  = intersection.element;
+      auto uv       = intersection.uv;
+      auto position = eval_position(instance, element, uv);
+      auto normal   = eval_shading_normal(instance, element, uv, outgoing);
+      auto emission = eval_emission(instance, element, uv, normal, outgoing);
+      auto opacity  = eval_opacity(instance, element, uv, normal, outgoing);
+      auto bsdf     = eval_bsdf(instance, element, uv, normal, outgoing);
+
+      // correct roughness
+      if (params.nocaustics) {
+        max_roughness  = max(bsdf.roughness, max_roughness);
+        bsdf.roughness = max_roughness;
+      }
+
+      // handle opacity
+      if (opacity < 1 && rand1f(rng) >= opacity) {
+        ray = {position + ray.d * 1e-2f, ray.d};
+        bounce -= 1;
+        continue;
+      }
+      hit = true;
+
+      if (position.y <= 0.01) {
+        // vec4f irradianceTexel =
+        // eval_texture(scene->trace_env->irradiance_map,
+        //     vec2f{position.x * 2.0f, position.z * 2.0f});
+
+        // vec4f specTexel = eval_texture(scene->trace_env->specular_map[0],
+        //     vec2f{position.x * 2.0f, position.z * 2.0f});
+
+        // vec4f brdfTexel = eval_texture(scene->trace_env->brdf_lut,
+        //     vec2f{position.x * 2.0f, position.z * 2.0f});
+
+        // weight *= vec3f{brdfTexel.x, brdfTexel.y, brdfTexel.z};
+      }
+
+      // accumulate emission
+      radiance += weight * eval_emission(emission, normal, outgoing);
+
+      // next direction
+      auto incoming = zero3f;
+      if (!is_delta(bsdf)) {
+        if (rand1f(rng) < 0.5f) {
+          incoming = sample_bsdfcos(
+              bsdf, normal, outgoing, rand1f(rng), rand2f(rng));
+        } else {
+          incoming = sample_lights(
+              scene, position, rand1f(rng), rand1f(rng), rand2f(rng));
+        }
+        weight *= eval_bsdfcos(bsdf, normal, outgoing, incoming) /
+                  (0.5f * sample_bsdfcos_pdf(bsdf, normal, outgoing, incoming) +
+                      0.5f * sample_lights_pdf(scene, position, incoming));
+      } else {
+        incoming = sample_delta(bsdf, normal, outgoing, rand1f(rng));
+        weight *= eval_delta(bsdf, normal, outgoing, incoming) /
+                  sample_delta_pdf(bsdf, normal, outgoing, incoming);
+      }
+
+      // update volume stack
+      if (has_volume(instance) &&
+          dot(normal, outgoing) * dot(normal, incoming) < 0) {
+        if (volume_stack.empty()) {
+          auto vsdf = eval_vsdf(instance, element, uv);
+          volume_stack.push_back(vsdf);
+        } else {
+          volume_stack.pop_back();
+        }
+      }
+
+      // setup next iteration
+      ray = {position, incoming};
+    } else {
+      // prepare shading point
+      auto  outgoing = -ray.d;
+      auto  position = ray.o + ray.d * intersection.distance;
+      auto& vsdf     = volume_stack.back();
+
+      // handle opacity
+      hit = true;
+
+      // accumulate emission
+      // radiance += weight * eval_volemission(emission, outgoing);
+
+      // next direction
+      auto incoming = zero3f;
+      if (rand1f(rng) < 0.5f) {
+        incoming = sample_scattering(vsdf, outgoing, rand1f(rng), rand2f(rng));
+      } else {
+        incoming = sample_lights(
+            scene, position, rand1f(rng), rand1f(rng), rand2f(rng));
+      }
+      weight *= eval_scattering(vsdf, outgoing, incoming) /
+                (0.5f * sample_scattering_pdf(vsdf, outgoing, incoming) +
+                    0.5f * sample_lights_pdf(scene, position, incoming));
+
+      // setup next iteration
+      ray = {position, incoming};
+    }
+
+    // check weight
+    if (weight == zero3f || !isfinite(weight)) break;
+
+    // russian roulette
+    if (bounce > 3) {
+      auto rr_prob = min((float)0.99, max(weight));
+      if (rand1f(rng) >= rr_prob) break;
+      weight *= 1 / rr_prob;
+    }
+  }
+
+  return {radiance.x, radiance.y, radiance.z, hit ? 1.0f : 0.0f};
+}
+
+// Eyelight for quick previewing.
 static vec4f trace_eyelight(const trace_scene* scene, const ray3f& ray_,
     rng_state& rng, const trace_params& params) {
   // initialize
@@ -2750,6 +2902,7 @@ using sampler_func = vec4f (*)(const trace_scene* scene, const ray3f& ray,
 static sampler_func get_trace_sampler_func(const trace_params& params) {
   switch (params.sampler) {
     case trace_sampler_type::path: return trace_path;
+    case trace_sampler_type::ibl: return trace_ibl;
     case trace_sampler_type::naive: return trace_naive;
     case trace_sampler_type::eyelight: return trace_eyelight;
     case trace_sampler_type::falsecolor: return trace_falsecolor;
@@ -2766,6 +2919,7 @@ static sampler_func get_trace_sampler_func(const trace_params& params) {
 bool is_sampler_lit(const trace_params& params) {
   switch (params.sampler) {
     case trace_sampler_type::path: return true;
+    case trace_sampler_type::ibl: return trace_ibl;
     case trace_sampler_type::naive: return true;
     case trace_sampler_type::eyelight: return false;
     case trace_sampler_type::falsecolor: return false;

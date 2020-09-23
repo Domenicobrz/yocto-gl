@@ -103,7 +103,6 @@ struct image {
   vector<T>&       data_vector();
   const vector<T>& data_vector() const;
 
- private:
   // data
   vec2i     extent = {0, 0};
   vector<T> pixels = {};

@@ -2552,26 +2552,6 @@ static vec4f trace_ibl(const trace_scene* scene, const ray3f& ray_,
   //             sample_delta_pdf(bsdf, normal, outgoing, incoming);
   // }
 
-  // ********** ibl ***********
-  /*
-    brdf_kd = vec3(0.0);
-    brdf_ks = vec3(1.0);
-    float roughness = 0.03;
-    vec3 F0 = vec3(1.0);
-
-    vec3 wi = normalize(reflect(-wo, n));
-    float MAX_REFLECTION_LOD = 5.0;
-    vec3 prefiltered_color = textureLod(prefiltered_cubemap, wi, roughness *
-    MAX_REFLECTION_LOD).rgb;
-
-    vec3 F = FresnelSchlickRoughness(max(dot(n, wo), 0.0), F0, roughness);
-    vec2 envBRDF  = texture(brdf_lut, vec2(max(dot(n, wo), 0.0), roughness)).rg;
-    vec3 specular = prefiltered_color * (F * envBRDF.x + envBRDF.y);
-
-    c += brdf_kd * textureLod(irradiance_cubemap, n, 0).rgb;
-    c += brdf_ks * specular;
-  */
-
   float roughness = min(sqrt(sqrt(bsdf.roughness)), 0.99);
 
   // get specular texel
@@ -2603,7 +2583,6 @@ static vec4f trace_ibl(const trace_scene* scene, const ray3f& ray_,
       (max(vec3f{1.0f - roughness, 1.0f - roughness, 1.0f - roughness}, F0) -
           F0) *
           pow(1.0f - max(dot(normal, outgoing), 0.0), 5.0f);
-  // vec3f F = bsdf.specular;
 
   // get BRDF texel
   vec4f BRDF_texel = eval_texture(scene->trace_env->brdf_lut,

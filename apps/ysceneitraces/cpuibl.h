@@ -120,20 +120,23 @@ inline vec4f getTexelFromDir(
   return img[ty * size.x + tx];
 }
 
+int                  ir_divisor = 4;
 inline vector<vec4f> computeIrradianceTexture(
     const vector<vec4f>& envmap, const vec2i& extent) {
-  auto size = envmap.size();
-  auto img  = vector<vec4f>(size);
+  auto size      = envmap.size();
+  auto ir_extent = vec2i{extent.x / ir_divisor, extent.y / ir_divisor};
+  int  ir_size   = ir_extent.x * ir_extent.y;
+  auto img       = vector<vec4f>(ir_size);
 
   // modify env texture
   auto f = [&](int i) {
-    int tx = i % extent.x;
-    int ty = i / extent.x;
+    int tx = i % (ir_extent.x);
+    int ty = i / (ir_extent.x);
     // printf("%d, %d\n", tx, ty);
 
     // uv.y needs to be flipped
     vec2f uv = {
-        float(tx) / float(extent.x), 1.0f - float(ty) / float(extent.y)};
+        float(tx) / float(ir_extent.x), 1.0f - float(ty) / float(ir_extent.y)};
 
     float dir_theta = (1.0f - uv.y) * pif;
     float dir_phi   = uv.x * pif * 2.0;
@@ -144,7 +147,6 @@ inline vector<vec4f> computeIrradianceTexture(
     vec4f vectest = getTexelFromDir(envmap, dir, extent);
 
     // ***************************
-    // ***************************
 
     vec3f normal     = dir;
     vec4f irradiance = {0, 0, 0, 0};
@@ -154,7 +156,7 @@ inline vector<vec4f> computeIrradianceTexture(
     up          = normalize(cross(normal, right));
 
     // float sampleDelta = 0.025;
-    float sampleDelta = 0.025;
+    float sampleDelta = 0.00625;
     float nrSamples   = 0.0;
     for (float phi = 0.0; phi < 2.0 * pif; phi += sampleDelta) {
       for (float theta = 0.0; theta < 0.5 * pif; theta += sampleDelta) {
@@ -176,10 +178,9 @@ inline vector<vec4f> computeIrradianceTexture(
     img[i] = {irradiance.x, irradiance.y, irradiance.z, 1};
 
     // ***************************
-    // ***************************
   };
 
-  parallel_for(16, size, f);
+  parallel_for(16, ir_size, f);
   // parallel_for(size, f);
   // serial_for(size, f);
 
@@ -315,7 +316,7 @@ inline void init_cpu_ibl(trace_scene* scene) {
   auto  extent = scene->environments[0]->emission_tex->hdr.imsize();
 
   auto& irradianceMap  = scene->trace_env->irradiance_map->hdr;
-  irradianceMap.extent = extent;
+  irradianceMap.extent = vec2i{extent.x / ir_divisor, extent.y / ir_divisor};
   irradianceMap.pixels = computeIrradianceTexture(img, extent);
 
   auto& BRDFLUT  = scene->trace_env->brdf_lut->hdr;

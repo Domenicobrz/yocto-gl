@@ -2595,7 +2595,14 @@ static vec4f trace_ibl(const trace_scene* scene, const ray3f& ray_,
   radiance += weight * vec3f{ir_texel.x, ir_texel.y, ir_texel.z} * bsdf.diffuse;
 
   // setup next iteration
-  ray = {position, incoming};
+  // fake ambient occlusion
+  ray = {position,
+      sample_diffuse_reflection(normal, outgoing, {rand1f(rng), rand1f(rng)})};
+
+  auto intersection2 = intersect_scene_bvh(scene, ray);
+  if (intersection2.hit) {
+    return {0.0f, 0.0f, 0.0f, 1.0f};
+  }
 
   return {radiance.x, radiance.y, radiance.z, hit ? 1.0f : 0.0f};
 }

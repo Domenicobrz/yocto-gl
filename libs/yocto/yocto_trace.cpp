@@ -2503,142 +2503,120 @@ static vec4f trace_ibl(const trace_scene* scene, const ray3f& ray_,
   auto hit           = !params.envhidden && !scene->environments.empty();
 
   // trace  path
-  for (auto bounce = 0; bounce < params.bounces; bounce++) {
-    // intersect next point
-    auto intersection = intersect_scene_bvh(scene, ray);
-    if (!intersection.hit) {
-      if (bounce || !params.envhidden)
-        radiance += weight * eval_environment(scene, ray.d);
-      break;
-    }
-
-    // handle transmission if inside a volume
-    auto in_volume = false;
-    if (!volume_stack.empty()) {
-      auto& vsdf     = volume_stack.back();
-      auto  distance = sample_transmittance(
-          vsdf.density, intersection.distance, rand1f(rng), rand1f(rng));
-      weight *= eval_transmittance(vsdf.density, distance) /
-                sample_transmittance_pdf(
-                    vsdf.density, distance, intersection.distance);
-      in_volume             = distance < intersection.distance;
-      intersection.distance = distance;
-    }
-
-    // switch between surface and volume
-    if (!in_volume) {
-      // prepare shading point
-      auto outgoing = -ray.d;
-      auto instance = scene->instances[intersection.instance];
-      auto element  = intersection.element;
-      auto uv       = intersection.uv;
-      auto position = eval_position(instance, element, uv);
-      auto normal   = eval_shading_normal(instance, element, uv, outgoing);
-      auto emission = eval_emission(instance, element, uv, normal, outgoing);
-      auto opacity  = eval_opacity(instance, element, uv, normal, outgoing);
-      auto bsdf     = eval_bsdf(instance, element, uv, normal, outgoing);
-
-      // correct roughness
-      if (params.nocaustics) {
-        max_roughness  = max(bsdf.roughness, max_roughness);
-        bsdf.roughness = max_roughness;
-      }
-
-      // handle opacity
-      if (opacity < 1 && rand1f(rng) >= opacity) {
-        ray = {position + ray.d * 1e-2f, ray.d};
-        bounce -= 1;
-        continue;
-      }
-      hit = true;
-
-      if (position.y <= 0.01) {
-        // vec4f irradianceTexel =
-        // eval_texture(scene->trace_env->irradiance_map,
-        //     vec2f{position.x * 2.0f, position.z * 2.0f});
-
-        // vec4f specTexel = eval_texture(scene->trace_env->specular_map[0],
-        //     vec2f{position.x * 2.0f, position.z * 2.0f});
-
-        // vec4f brdfTexel = eval_texture(scene->trace_env->brdf_lut,
-        //     vec2f{position.x * 2.0f, position.z * 2.0f});
-
-        // weight *= vec3f{brdfTexel.x, brdfTexel.y, brdfTexel.z};
-      }
-
-      // accumulate emission
-      radiance += weight * eval_emission(emission, normal, outgoing);
-
-      // next direction
-      auto incoming = zero3f;
-      if (!is_delta(bsdf)) {
-        if (rand1f(rng) < 0.5f) {
-          incoming = sample_bsdfcos(
-              bsdf, normal, outgoing, rand1f(rng), rand2f(rng));
-        } else {
-          incoming = sample_lights(
-              scene, position, rand1f(rng), rand1f(rng), rand2f(rng));
-        }
-        weight *= eval_bsdfcos(bsdf, normal, outgoing, incoming) /
-                  (0.5f * sample_bsdfcos_pdf(bsdf, normal, outgoing, incoming) +
-                      0.5f * sample_lights_pdf(scene, position, incoming));
-      } else {
-        incoming = sample_delta(bsdf, normal, outgoing, rand1f(rng));
-        weight *= eval_delta(bsdf, normal, outgoing, incoming) /
-                  sample_delta_pdf(bsdf, normal, outgoing, incoming);
-      }
-
-      // update volume stack
-      if (has_volume(instance) &&
-          dot(normal, outgoing) * dot(normal, incoming) < 0) {
-        if (volume_stack.empty()) {
-          auto vsdf = eval_vsdf(instance, element, uv);
-          volume_stack.push_back(vsdf);
-        } else {
-          volume_stack.pop_back();
-        }
-      }
-
-      // setup next iteration
-      ray = {position, incoming};
-    } else {
-      // prepare shading point
-      auto  outgoing = -ray.d;
-      auto  position = ray.o + ray.d * intersection.distance;
-      auto& vsdf     = volume_stack.back();
-
-      // handle opacity
-      hit = true;
-
-      // accumulate emission
-      // radiance += weight * eval_volemission(emission, outgoing);
-
-      // next direction
-      auto incoming = zero3f;
-      if (rand1f(rng) < 0.5f) {
-        incoming = sample_scattering(vsdf, outgoing, rand1f(rng), rand2f(rng));
-      } else {
-        incoming = sample_lights(
-            scene, position, rand1f(rng), rand1f(rng), rand2f(rng));
-      }
-      weight *= eval_scattering(vsdf, outgoing, incoming) /
-                (0.5f * sample_scattering_pdf(vsdf, outgoing, incoming) +
-                    0.5f * sample_lights_pdf(scene, position, incoming));
-
-      // setup next iteration
-      ray = {position, incoming};
-    }
-
-    // check weight
-    if (weight == zero3f || !isfinite(weight)) break;
-
-    // russian roulette
-    if (bounce > 3) {
-      auto rr_prob = min((float)0.99, max(weight));
-      if (rand1f(rng) >= rr_prob) break;
-      weight *= 1 / rr_prob;
-    }
+  // intersect next point
+  auto intersection = intersect_scene_bvh(scene, ray);
+  if (!intersection.hit) {
+    if (!params.envhidden) radiance += weight * eval_environment(scene, ray.d);
+    return {radiance.x, radiance.y, radiance.z, hit ? 1.0f : 0.0f};
   }
+
+  // switch between surface and volume
+  // prepare shading point
+  auto outgoing = -ray.d;
+  auto instance = scene->instances[intersection.instance];
+  auto element  = intersection.element;
+  auto uv       = intersection.uv;
+  auto position = eval_position(instance, element, uv);
+  auto normal   = eval_shading_normal(instance, element, uv, outgoing);
+  auto emission = eval_emission(instance, element, uv, normal, outgoing);
+  auto opacity  = eval_opacity(instance, element, uv, normal, outgoing);
+  auto bsdf     = eval_bsdf(instance, element, uv, normal, outgoing);
+
+  // correct roughness
+  if (params.nocaustics) {
+    max_roughness  = max(bsdf.roughness, max_roughness);
+    bsdf.roughness = max_roughness;
+  }
+
+  hit = true;
+
+  // accumulate emission
+  radiance += weight * eval_emission(emission, normal, outgoing);
+
+  // next direction
+  auto incoming = zero3f;
+  // if (!is_delta(bsdf)) {
+  //   if (rand1f(rng) < 0.5f) {
+  //     incoming = sample_bsdfcos(
+  //         bsdf, normal, outgoing, rand1f(rng), rand2f(rng));
+  //   } else {
+  //     incoming = sample_lights(
+  //         scene, position, rand1f(rng), rand1f(rng), rand2f(rng));
+  //   }
+  //   weight *= eval_bsdfcos(bsdf, normal, outgoing, incoming) /
+  //             (0.5f * sample_bsdfcos_pdf(bsdf, normal, outgoing, incoming) +
+  //                 0.5f * sample_lights_pdf(scene, position, incoming));
+  // } else {
+  //   incoming = sample_delta(bsdf, normal, outgoing, rand1f(rng));
+  //   weight *= eval_delta(bsdf, normal, outgoing, incoming) /
+  //             sample_delta_pdf(bsdf, normal, outgoing, incoming);
+  // }
+
+  // ********** ibl ***********
+  /*
+    brdf_kd = vec3(0.0);
+    brdf_ks = vec3(1.0);
+    float roughness = 0.03;
+    vec3 F0 = vec3(1.0);
+
+    vec3 wi = normalize(reflect(-wo, n));
+    float MAX_REFLECTION_LOD = 5.0;
+    vec3 prefiltered_color = textureLod(prefiltered_cubemap, wi, roughness *
+    MAX_REFLECTION_LOD).rgb;
+
+    vec3 F = FresnelSchlickRoughness(max(dot(n, wo), 0.0), F0, roughness);
+    vec2 envBRDF  = texture(brdf_lut, vec2(max(dot(n, wo), 0.0), roughness)).rg;
+    vec3 specular = prefiltered_color * (F * envBRDF.x + envBRDF.y);
+
+    c += brdf_kd * textureLod(irradiance_cubemap, n, 0).rgb;
+    c += brdf_ks * specular;
+  */
+
+  float roughness = min(sqrt(sqrt(bsdf.roughness)), 0.99);
+
+  // get specular texel
+  vec3f refl  = normalize(reflect(-outgoing, normal));
+  refl.z      = -refl.z;
+  vec2f pm_uv = {yocto::atan2(refl.z, refl.x) / (2.0f * pif),
+      1.0f - yocto::acos(refl.y) / pif};
+  if (pm_uv.x < 0) pm_uv.x = 1.0f + pm_uv.x;
+  int   max_mip_level = scene->trace_env->specular_map.size();
+  float t             = fmod(roughness * float(max_mip_level), 1.0f);
+  int   base_mip      = roughness * float(max_mip_level) -
+                 fmod(roughness * float(max_mip_level), 1.0f);
+  vec4f pm_texel_1 = eval_texture(
+      scene->trace_env->specular_map[base_mip], pm_uv);
+  vec4f pm_texel_2 = eval_texture(
+      scene->trace_env->specular_map[base_mip + 1], pm_uv);
+  vec4f pm_texel = pm_texel_1 * (1.0f - t) + pm_texel_2 * t;
+
+  // get irradiance texel
+  vec2f ir_uv = {yocto::atan2(normal.z, normal.x) / (2.0f * pif),
+      1.0f - yocto::acos(normal.y) / pif};
+  if (ir_uv.x < 0) ir_uv.x = 1.0f + ir_uv.x;
+  vec4f ir_texel = eval_texture(scene->trace_env->irradiance_map, ir_uv);
+
+  // inline fresnel shlick roughness
+  float F0 = 0.04;
+  vec3f F =
+      F0 +
+      (max(vec3f{1.0f - roughness, 1.0f - roughness, 1.0f - roughness}, F0) -
+          F0) *
+          pow(1.0f - max(dot(normal, outgoing), 0.0), 5.0f);
+  // vec3f F = bsdf.specular;
+
+  // get BRDF texel
+  vec4f BRDF_texel = eval_texture(scene->trace_env->brdf_lut,
+      vec2f{min(max(dot(normal, outgoing), 0.0), 0.99), roughness});
+
+  vec3f specular = vec3f{pm_texel.x, pm_texel.y, pm_texel.z} *
+                   (F * BRDF_texel.x + BRDF_texel.y);
+
+  radiance += weight * specular;
+  radiance += weight * vec3f{ir_texel.x, ir_texel.y, ir_texel.z} * bsdf.diffuse;
+
+  // setup next iteration
+  ray = {position, incoming};
 
   return {radiance.x, radiance.y, radiance.z, hit ? 1.0f : 0.0f};
 }

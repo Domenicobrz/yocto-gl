@@ -2560,10 +2560,15 @@ static vec4f trace_ibl(const trace_scene* scene, const ray3f& ray_,
   vec2f pm_uv = {yocto::atan2(refl.z, refl.x) / (2.0f * pif),
       1.0f - yocto::acos(refl.y) / pif};
   if (pm_uv.x < 0) pm_uv.x = 1.0f + pm_uv.x;
+
   int   max_mip_level = scene->trace_env->specular_map.size();
   float t             = fmod(roughness * float(max_mip_level), 1.0f);
-  int   base_mip      = roughness * float(max_mip_level) -
-                 fmod(roughness * float(max_mip_level), 1.0f);
+  int   base_mip      = roughness * float(max_mip_level);
+  base_mip -= fmod(roughness * float(max_mip_level), 1.0f);
+  if ((base_mip + 1) == max_mip_level) {
+    base_mip -= 1;
+    t = 0.99;
+  }
   vec4f pm_texel_1 = eval_texture(
       scene->trace_env->specular_map[base_mip], pm_uv);
   vec4f pm_texel_2 = eval_texture(
@@ -2577,12 +2582,14 @@ static vec4f trace_ibl(const trace_scene* scene, const ray3f& ray_,
   vec4f ir_texel = eval_texture(scene->trace_env->irradiance_map, ir_uv);
 
   // inline fresnel shlick roughness
-  float F0 = 0.04;
-  vec3f F =
-      F0 +
-      (max(vec3f{1.0f - roughness, 1.0f - roughness, 1.0f - roughness}, F0) -
-          F0) *
-          pow(1.0f - max(dot(normal, outgoing), 0.0), 5.0f);
+  // float F0 = 0.04;
+  // vec3f F =
+  //     F0 +
+  //     (max(vec3f{1.0f - roughness, 1.0f - roughness, 1.0f - roughness}, F0) -
+  //         F0) *
+  //         pow(1.0f - max(dot(normal, outgoing), 0.0), 5.0f);
+
+  vec3f F = bsdf.metal;
 
   // get BRDF texel
   vec4f BRDF_texel = eval_texture(scene->trace_env->brdf_lut,
@@ -2605,7 +2612,7 @@ static vec4f trace_ibl(const trace_scene* scene, const ray3f& ray_,
   }
 
   return {radiance.x, radiance.y, radiance.z, hit ? 1.0f : 0.0f};
-}
+}  // namespace yocto
 
 // Eyelight for quick previewing.
 static vec4f trace_eyelight(const trace_scene* scene, const ray3f& ray_,

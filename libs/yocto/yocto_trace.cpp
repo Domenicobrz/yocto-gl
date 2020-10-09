@@ -2589,7 +2589,10 @@ static vec4f trace_ibl(const trace_scene* scene, const ray3f& ray_,
   //         F0) *
   //         pow(1.0f - max(dot(normal, outgoing), 0.0), 5.0f);
 
-  vec3f F = bsdf.metal;
+  // vec3f F = bsdf.specular;
+  vec3f F = (1 - bsdf.metal) * bsdf.specular *
+                fresnel_dielectric(bsdf.ior, normal, normal) +
+            bsdf.metal;
 
   // get BRDF texel
   vec4f BRDF_texel = eval_texture(scene->trace_env->brdf_lut,

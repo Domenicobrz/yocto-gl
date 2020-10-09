@@ -311,46 +311,48 @@ struct trace_environment_precompute {
   trace_texture* brdf_lut       = new trace_texture{};
 } trace_env_precumpute;
 
+bool        compute_trace_env_maps = false;
 inline void init_cpu_ibl(trace_scene* scene) {
   auto& img    = scene->environments[0]->emission_tex->hdr.data_vector();
   auto  extent = scene->environments[0]->emission_tex->hdr.imsize();
 
-  // auto& irradianceMap  = scene->trace_env->irradiance_map->hdr;
-  // irradianceMap.extent = ir_extent;
-  // irradianceMap.pixels = computeIrradianceTexture(img, extent);
+  if (compute_trace_env_maps) {
+    auto& irradianceMap  = scene->trace_env->irradiance_map->hdr;
+    irradianceMap.extent = ir_extent;
+    irradianceMap.pixels = computeIrradianceTexture(img, extent);
 
-  // auto& BRDFLUT  = scene->trace_env->brdf_lut->hdr;
-  // BRDFLUT.extent = brdf_extent;
-  // BRDFLUT.pixels = computeBRDFLUT();
+    auto& BRDFLUT  = scene->trace_env->brdf_lut->hdr;
+    BRDFLUT.extent = brdf_extent;
+    BRDFLUT.pixels = computeBRDFLUT();
 
-  int   prefiltered_maps_levels = 5;
-  auto& prefilteredMapsVector   = scene->trace_env->specular_map;
-  auto  prefilteredMaps         = computePrefilteredTextures(
-      img, extent, prefiltered_maps_levels);
-  for (int i = 0; i < prefiltered_maps_levels; i++) {
-    trace_texture* spec_level_texture = new trace_texture{};
-    spec_level_texture->hdr.extent    = prefiltered_maps_extent;
-    spec_level_texture->hdr.pixels    = prefilteredMaps[i];
-    prefilteredMapsVector.push_back(spec_level_texture);
+    auto& prefilteredMapsVector = scene->trace_env->specular_map;
+    auto  prefilteredMaps       = computePrefilteredTextures(
+        img, extent, prefiltered_maps_levels);
+    for (int i = 0; i < prefiltered_maps_levels; i++) {
+      trace_texture* spec_level_texture = new trace_texture{};
+      spec_level_texture->hdr.extent    = prefiltered_maps_extent;
+      spec_level_texture->hdr.pixels    = prefilteredMaps[i];
+      prefilteredMapsVector.push_back(spec_level_texture);
+    }
+  } else {
+    // load trace env maps from existing images
+    scene->trace_env->environment = scene->environments[0]->emission_tex;
+
+    string err;
+    yocto::load_image("BRDFLut.hdr", scene->trace_env->brdf_lut->hdr, err);
+    yocto::load_image(
+        "irradiance.hdr", scene->trace_env->irradiance_map->hdr, err);
+
+    for (int i = 0; i < prefiltered_maps_levels; i++) {
+      trace_texture* spec_level_texture = new trace_texture{};
+
+      char buff[100];
+      snprintf(buff, sizeof(buff), "prefiltered_%d.hdr", i);
+      std::string path = buff;
+      yocto::load_image(buff, spec_level_texture->hdr, err);
+
+      scene->trace_env->specular_map.push_back(spec_level_texture);
+    }
   }
-
-  scene->trace_env->environment = scene->environments[0]->emission_tex;
-
-  string err;
-  yocto::load_image("BRDFLut.hdr", scene->trace_env->brdf_lut->hdr, err);
-  yocto::load_image(
-      "irradiance.hdr", scene->trace_env->irradiance_map->hdr, err);
-
-  // int specularLevels = 5;
-  // for (int i = 0; i < specularLevels; i++) {
-  //   trace_texture* spec_level_texture = new trace_texture{};
-
-  //   char buff[100];
-  //   snprintf(buff, sizeof(buff), "prefiltered_%d.hdr", i);
-  //   std::string path = buff;
-  //   yocto::load_image(buff, spec_level_texture->hdr, err);
-
-  //   scene->trace_env->specular_map.push_back(spec_level_texture);
-  // }
 }
 }  // namespace cpuibl

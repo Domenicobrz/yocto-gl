@@ -120,13 +120,11 @@ inline vec4f getTexelFromDir(
   return img[ty * size.x + tx];
 }
 
-int                  ir_divisor = 4;
+vec2i                ir_extent = vec2i{256, 128};
 inline vector<vec4f> computeIrradianceTexture(
     const vector<vec4f>& envmap, const vec2i& extent) {
-  auto size      = envmap.size();
-  auto ir_extent = vec2i{extent.x / ir_divisor, extent.y / ir_divisor};
-  int  ir_size   = ir_extent.x * ir_extent.y;
-  auto img       = vector<vec4f>(ir_size);
+  int  ir_size = ir_extent.x * ir_extent.y;
+  auto img     = vector<vec4f>(ir_size);
 
   // modify env texture
   auto f = [&](int i) {
@@ -155,9 +153,9 @@ inline vector<vec4f> computeIrradianceTexture(
     vec3f right = normalize(cross(up, normal));
     up          = normalize(cross(normal, right));
 
-    // float sampleDelta = 0.025;
-    float sampleDelta = 0.00625;
-    float nrSamples   = 0.0;
+    float sampleDelta = 0.025;
+    // float sampleDelta = 0.00625;
+    float nrSamples = 0.0;
     for (float phi = 0.0; phi < 2.0 * pif; phi += sampleDelta) {
       for (float theta = 0.0; theta < 0.5 * pif; theta += sampleDelta) {
         // spherical to cartesian (in tangent space)
@@ -181,8 +179,6 @@ inline vector<vec4f> computeIrradianceTexture(
   };
 
   parallel_for(16, ir_size, f);
-  // parallel_for(size, f);
-  // serial_for(size, f);
 
   return img;
 }  // namespace cpuibl
@@ -317,7 +313,7 @@ inline void init_cpu_ibl(trace_scene* scene) {
   auto  extent = scene->environments[0]->emission_tex->hdr.imsize();
 
   // auto& irradianceMap  = scene->trace_env->irradiance_map->hdr;
-  // irradianceMap.extent = vec2i{extent.x / ir_divisor, extent.y / ir_divisor};
+  // irradianceMap.extent = ir_extent;
   // irradianceMap.pixels = computeIrradianceTexture(img, extent);
 
   // auto& BRDFLUT  = scene->trace_env->brdf_lut->hdr;

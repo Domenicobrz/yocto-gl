@@ -234,13 +234,13 @@
       "color_tex": "floor"
     },
     "bunny-uvgrid": {
-      "specular": 1,
+      "metallic": 0.02,
       "color": [
         1,
         1,
         1
       ],
-      "roughness": 0.1,
+      "roughness": 0.95,
       "color_tex": "uvgrid"
     },
     "sphere-plastic-sharp": {

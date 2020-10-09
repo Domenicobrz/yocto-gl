@@ -2596,7 +2596,9 @@ static vec4f trace_ibl(const trace_scene* scene, const ray3f& ray_,
 
   // get BRDF texel
   vec4f BRDF_texel = eval_texture(scene->trace_env->brdf_lut,
-      vec2f{min(max(dot(normal, outgoing), 0.0), 0.99), roughness});
+      vec2f{min(max(dot(normal, outgoing), 0.0), 0.99),
+          1.0f - roughness});  // 1.0 - roughness since the texture is read
+                               // upside-down
 
   vec3f specular = vec3f{pm_texel.x, pm_texel.y, pm_texel.z} *
                    (F * BRDF_texel.x + BRDF_texel.y);

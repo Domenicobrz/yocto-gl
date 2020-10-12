@@ -130,7 +130,6 @@ inline vector<vec4f> computeIrradianceTexture(
   auto f = [&](int i) {
     int tx = i % (ir_extent.x);
     int ty = i / (ir_extent.x);
-    // printf("%d, %d\n", tx, ty);
 
     // uv.y needs to be flipped
     vec2f uv = {
@@ -143,8 +142,6 @@ inline vector<vec4f> computeIrradianceTexture(
     dir             = normalize(dir);
 
     vec4f vectest = getTexelFromDir(envmap, dir, extent);
-
-    // ***************************
 
     vec3f normal     = dir;
     vec4f irradiance = {0, 0, 0, 0};
@@ -174,14 +171,12 @@ inline vector<vec4f> computeIrradianceTexture(
     irradiance = pif * irradiance * (1.0f / float(nrSamples));
 
     img[i] = {irradiance.x, irradiance.y, irradiance.z, 1};
-
-    // ***************************
   };
 
   parallel_for(16, ir_size, f);
 
   return img;
-}  // namespace cpuibl
+}
 
 vec2i                        prefiltered_maps_extent = vec2i{256, 128};
 int                          prefiltered_maps_levels = 5;
@@ -230,8 +225,8 @@ inline vector<vector<vec4f>> computePrefilteredTextures(
                               // direction of reflect glsl
         float NdotL = dot(N, L);
         if (NdotL > 0.0f) {
+          // speed-up hack that reuses previously computed levels
           // result += getTexelFromDir(l == 0 ? envmap : imgs[l - 1], L, extent)
-          // *
           result += getTexelFromDir(envmap, L, extent) * NdotL;
           total_weight += NdotL;
         }
@@ -274,7 +269,7 @@ inline vector<vec4f> computeBRDFLUT() {
 
     vec3f N = vec3f{0.0f, 0.0f, 1.0f};
 
-    const uint SAMPLE_COUNT = 1024;  // 1024u;
+    const uint SAMPLE_COUNT = 1024;
     for (uint i = 0u; i < SAMPLE_COUNT; ++i) {
       vec2f Xi = hammersley(i, SAMPLE_COUNT);
       vec3f H  = sample_ggx(Xi, N, roughness);

@@ -134,7 +134,7 @@
       "material": "floor"
     },
     "bunny-uvgrid": {
-      "shape": "sphere",
+      "shape": "bunny",
       "frame": [
         1,
         0,
@@ -170,7 +170,7 @@
       "material": "sphere-plastic-sharp"
     },
     "bunny-metal-rough": {
-      "shape": "sphere",
+      "shape": "bunny",
       "frame": [
         1,
         0,
@@ -206,7 +206,7 @@
       "material": "sphere-plastic-rough"
     },
     "bunny-metal-sharp": {
-      "shape": "sphere",
+      "shape": "bunny",
       "frame": [
         1,
         0,
@@ -240,7 +240,7 @@
         1,
         1
       ],
-      "roughness": 0.95,
+      "roughness": 0.0,
       "color_tex": "uvgrid"
     },
     "sphere-plastic-sharp": {
@@ -259,7 +259,7 @@
         0.34
       ],
       "metallic": 1,
-      "roughness": 0.2
+      "roughness": 0.3
     },
     "sphere-plastic-rough": {
       "specular": 1,
@@ -278,7 +278,7 @@
         1.0
       ],
       "metallic": 1,
-      "roughness": 0.99
+      "roughness": 0
     }
   }
 }

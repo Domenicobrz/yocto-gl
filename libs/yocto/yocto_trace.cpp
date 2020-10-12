@@ -2533,47 +2533,53 @@ static vec4f trace_ibl(const trace_scene* scene, const ray3f& ray_,
   // accumulate emission
   radiance += weight * eval_emission(emission, normal, outgoing);
 
+  /*
   // next direction
   auto incoming = zero3f;
-  // if (!is_delta(bsdf)) {
-  //   if (rand1f(rng) < 0.5f) {
-  //     incoming = sample_bsdfcos(
-  //         bsdf, normal, outgoing, rand1f(rng), rand2f(rng));
-  //   } else {
-  //     incoming = sample_lights(
-  //         scene, position, rand1f(rng), rand1f(rng), rand2f(rng));
-  //   }
-  //   weight *= eval_bsdfcos(bsdf, normal, outgoing, incoming) /
-  //             (0.5f * sample_bsdfcos_pdf(bsdf, normal, outgoing, incoming) +
-  //                 0.5f * sample_lights_pdf(scene, position, incoming));
-  // } else {
-  //   incoming = sample_delta(bsdf, normal, outgoing, rand1f(rng));
-  //   weight *= eval_delta(bsdf, normal, outgoing, incoming) /
-  //             sample_delta_pdf(bsdf, normal, outgoing, incoming);
-  // }
 
+  if (!is_delta(bsdf)) {
+    if (rand1f(rng) < 0.5f) {
+      incoming = sample_bsdfcos(
+          bsdf, normal, outgoing, rand1f(rng), rand2f(rng));
+    } else {
+      incoming = sample_lights(
+          scene, position, rand1f(rng), rand1f(rng), rand2f(rng));
+    }
+    weight *= eval_bsdfcos(bsdf, normal, outgoing, incoming) /
+              (0.5f * sample_bsdfcos_pdf(bsdf, normal, outgoing, incoming) +
+                  0.5f * sample_lights_pdf(scene, position, incoming));
+  } else {
+    incoming = sample_delta(bsdf, normal, outgoing, rand1f(rng));
+    weight *= eval_delta(bsdf, normal, outgoing, incoming) /
+              sample_delta_pdf(bsdf, normal, outgoing, incoming);
+  }
+  */
+
+  // two sqrts since bsdf.roughness is squared
   float roughness = min(sqrt(sqrt(bsdf.roughness)), 0.99);
 
   // get specular texel
-  vec3f refl  = normalize(reflect(-outgoing, normal));
-  refl.z      = -refl.z;
-  vec2f pm_uv = {yocto::atan2(refl.z, refl.x) / (2.0f * pif),
+  vec3f refl    = normalize(reflect(-outgoing, normal));
+  refl.z        = -refl.z;
+  vec2f spec_uv = {yocto::atan2(refl.z, refl.x) / (2.0f * pif),
       1.0f - yocto::acos(refl.y) / pif};
-  if (pm_uv.x < 0) pm_uv.x = 1.0f + pm_uv.x;
+  if (spec_uv.x < 0) spec_uv.x = 1.0f + spec_uv.x;
 
   int   max_mip_level = scene->trace_env->specular_map.size();
   float t             = fmod(roughness * float(max_mip_level), 1.0f);
   int   base_mip      = roughness * float(max_mip_level);
   base_mip -= fmod(roughness * float(max_mip_level), 1.0f);
+  // make sure we don't overflow
   if ((base_mip + 1) == max_mip_level) {
     base_mip -= 1;
     t = 0.99;
   }
-  vec4f pm_texel_1 = eval_texture(
-      scene->trace_env->specular_map[base_mip], pm_uv);
-  vec4f pm_texel_2 = eval_texture(
-      scene->trace_env->specular_map[base_mip + 1], pm_uv);
-  vec4f pm_texel = pm_texel_1 * (1.0f - t) + pm_texel_2 * t;
+  // linearly interpolate between the two mip levels of the prefiltered maps
+  vec4f spec_texel_1 = eval_texture(
+      scene->trace_env->specular_map[base_mip], spec_uv);
+  vec4f spec_texel_2 = eval_texture(
+      scene->trace_env->specular_map[base_mip + 1], spec_uv);
+  vec4f spec_texel = spec_texel_1 * (1.0f - t) + spec_texel_2 * t;
 
   // get irradiance texel
   vec2f ir_uv = {yocto::atan2(normal.z, normal.x) / (2.0f * pif),
@@ -2589,7 +2595,6 @@ static vec4f trace_ibl(const trace_scene* scene, const ray3f& ray_,
   //         F0) *
   //         pow(1.0f - max(dot(normal, outgoing), 0.0), 5.0f);
 
-  // vec3f F = bsdf.specular;
   vec3f F = (1 - bsdf.metal) * bsdf.specular *
                 fresnel_dielectric(bsdf.ior, normal, normal) +
             bsdf.metal;
@@ -2600,7 +2605,7 @@ static vec4f trace_ibl(const trace_scene* scene, const ray3f& ray_,
           1.0f - roughness});  // 1.0 - roughness since the texture is created
                                // upside-down
 
-  vec3f specular = vec3f{pm_texel.x, pm_texel.y, pm_texel.z} *
+  vec3f specular = vec3f{spec_texel.x, spec_texel.y, spec_texel.z} *
                    (F * BRDF_texel.x + BRDF_texel.y);
 
   radiance += weight * specular;
